@@ -1,0 +1,70 @@
+{
+  "manifest_version": 3,
+  "name": "Recollect - Save & Search Videos",
+  "version": "1.0.0",
+  "description": "Save videos from Instagram, YouTube, TikTok, and LinkedIn. Search them instantly using AI.",
+  "permissions": [
+    "activeTab",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://www.instagram.com/*",
+    "https://www.youtube.com/*",
+    "https://www.tiktok.com/*",
+    "https://www.linkedin.com/*",
+    "https://recollectai.app/*",
+    "https://video-ingest.up.railway.app/*",
+    "https://auth-production-a.up.railway.app/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "public/icons/icon16.png",
+      "32": "public/icons/icon32.png",
+      "48": "public/icons/icon48.png",
+      "128": "public/icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "public/icons/icon16.png",
+    "32": "public/icons/icon32.png",
+    "48": "public/icons/icon48.png",
+    "128": "public/icons/icon128.png"
+  },
+  "background": {
+    "service_worker": "background/service-worker.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://recollectai.app/*"],
+      "js": ["content/webapp-sync.js"],
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["https://www.linkedin.com/*"],
+      "js": ["content/linkedin.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://www.instagram.com/*"],
+      "js": ["content/instagram.js"],
+      "run_at": "document_end"
+    },
+    {
+      "matches": ["https://www.youtube.com/*"],
+      "js": ["content/youtube.js"],
+      "run_at": "document_end"
+    },
+    {
+      "matches": ["https://www.tiktok.com/*"],
+      "js": ["content/tiktok.js"],
+      "run_at": "document_end"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["public/icons/*", "public/recollect_logo.png", "public/icon_with_dark_bg.png"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}

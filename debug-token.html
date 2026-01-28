@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Recollect Extension Debug</title>
+  <style>
+    body {
+      font-family: monospace;
+      padding: 20px;
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    button {
+      padding: 10px 20px;
+      margin: 5px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    pre {
+      background: #f5f5f5;
+      padding: 15px;
+      border-radius: 5px;
+      overflow-x: auto;
+    }
+    .success { color: green; }
+    .error { color: red; }
+    .info { color: blue; }
+  </style>
+</head>
+<body>
+  <h1>Recollect Extension Debug</h1>
+
+  <h2>Chrome Storage</h2>
+  <button onclick="checkChromeStorage()">Check Chrome Storage</button>
+  <button onclick="clearChromeStorage()">Clear Chrome Storage</button>
+  <button onclick="setTestToken()">Set Test Token</button>
+  <pre id="chromeStorageOutput">Click "Check Chrome Storage" to view...</pre>
+
+  <h2>LocalStorage</h2>
+  <button onclick="checkLocalStorage()">Check LocalStorage</button>
+  <button onclick="setLocalStorageToken()">Set LocalStorage Token</button>
+  <button onclick="triggerSync()">Trigger Manual Sync</button>
+  <pre id="localStorageOutput">Click "Check LocalStorage" to view...</pre>
+
+  <h2>Instructions</h2>
+  <ol>
+    <li>Make sure the extension is loaded</li>
+    <li>Open this file and click "Check Chrome Storage"</li>
+    <li>Go to localhost:3000 and sign in</li>
+    <li>Come back here and click "Check Chrome Storage" again</li>
+    <li>Token should appear</li>
+  </ol>
+
+  <script>
+    function checkChromeStorage() {
+      if (typeof chrome !== 'undefined' && chrome.storage) {
+        chrome.storage.local.get(null, (items) => {
+          document.getElementById('chromeStorageOutput').innerHTML =
+            '<span class="success">Chrome Storage Contents:</span>\n' +
+            JSON.stringify(items, null, 2);
+        });
+      } else {
+        document.getElementById('chromeStorageOutput').innerHTML =
+          '<span class="error">Chrome storage not available (extension not loaded?)</span>';
+      }
+    }
+
+    function clearChromeStorage() {
+      if (typeof chrome !== 'undefined' && chrome.storage) {
+        chrome.storage.local.clear(() => {
+          document.getElementById('chromeStorageOutput').innerHTML =
+            '<span class="info">Chrome storage cleared!</span>';
+          setTimeout(checkChromeStorage, 100);
+        });
+      }
+    }
+
+    function setTestToken() {
+      if (typeof chrome !== 'undefined' && chrome.storage) {
+        chrome.storage.local.set({ token: 'test_token_12345' }, () => {
+          document.getElementById('chromeStorageOutput').innerHTML =
+            '<span class="success">Test token set!</span>';
+          setTimeout(checkChromeStorage, 100);
+        });
+      }
+    }
+
+    function checkLocalStorage() {
+      const items = {};
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        items[key] = localStorage.getItem(key);
+      }
+      document.getElementById('localStorageOutput').innerHTML =
+        '<span class="success">LocalStorage Contents:</span>\n' +
+        JSON.stringify(items, null, 2);
+    }
+
+    function setLocalStorageToken() {
+      localStorage.setItem('token', 'local_test_token_67890');
+      localStorage.setItem('access_token', 'local_test_access_token_67890');
+      document.getElementById('localStorageOutput').innerHTML =
+        '<span class="success">LocalStorage tokens set!</span>';
+      setTimeout(checkLocalStorage, 100);
+    }
+
+    function triggerSync() {
+      window.postMessage({ type: 'RECOLLECT_TOKEN_UPDATE' }, window.location.origin);
+      document.getElementById('localStorageOutput').innerHTML =
+        '<span class="info">Sync message posted! Check console for webapp-sync logs.</span>';
+    }
+
+    // Auto-check on load
+    window.onload = () => {
+      checkChromeStorage();
+      checkLocalStorage();
+    };
+  </script>
+</body>
+</html>
