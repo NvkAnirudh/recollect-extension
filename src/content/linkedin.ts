@@ -63,39 +63,33 @@ function injectStyles() {
       background: transparent;
       border: none;
       cursor: pointer;
-      transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
       flex-shrink: 0;
       position: relative;
     }
 
     .${RECOLLECT_BUTTON_CLASS} img {
       width: 30px;
-      /* height: 24px; */
       display: block;
       object-fit: contain;
       border-radius: 50px;
-      transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+      transition: all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
       filter: drop-shadow(0 0 0 transparent);
     }
 
     .${RECOLLECT_BUTTON_CLASS}:hover {
-      transform: translateY(-4px) scale(1.1);
+      background: transparent !important;
     }
 
     .${RECOLLECT_BUTTON_CLASS}:hover img {
       transform: scale(1.15);
-      filter: drop-shadow(0 4px 12px rgba(147, 112, 219, 0.4))
-              drop-shadow(0 0 8px rgba(147, 112, 219, 0.3))
+      filter: drop-shadow(0 2px 8px rgba(147, 112, 219, 0.4))
+              drop-shadow(0 0 6px rgba(147, 112, 219, 0.3))
               brightness(1.1);
-    }
-
-    .${RECOLLECT_BUTTON_CLASS}:active {
-      transform: translateY(-2px) scale(1.05);
     }
 
     .${RECOLLECT_BUTTON_CLASS}:active img {
       transform: scale(1.05);
-      filter: drop-shadow(0 2px 6px rgba(147, 112, 219, 0.3));
+      filter: drop-shadow(0 1px 4px rgba(147, 112, 219, 0.3));
     }
 
     .${RECOLLECT_BUTTON_CLASS}.saving {
@@ -542,15 +536,16 @@ function injectStyles() {
       top: 50%;
       transform: translateY(-50%);
       /* background: transparent; */
-      /* border: 3px solid rgba(147, 112, 219, 0.6); */
+      border: none;
       border-radius: 50%;
       width: 56px;
       height: 56px;
-      padding: 8px;
+      padding: 0;
       cursor: pointer;
       z-index: 999997;
       transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      box-shadow: none;
+      background: transparent;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -558,8 +553,7 @@ function injectStyles() {
 
     .recollect-toggle-button:hover {
       transform: translateY(-50%) scale(1.1);
-      box-shadow: 0 4px 16px rgba(147, 112, 219, 0.3);
-      border-color: rgba(147, 112, 219, 0.9);
+      box-shadow: none;
     }
 
     .recollect-toggle-button:active {
@@ -1630,119 +1624,292 @@ function toggleSidebar() {
   }
 }
 
-// Check if an element is inside the LinkedIn feed (not notifications, messaging, etc.)
-function isInFeedContext(el: Element): boolean {
-  // Walk up the DOM to check we're in a feed context, not notifications/messaging
-  const notificationSelectors = [
-    '.nt-card',                                    // notification cards
-    '.notifications-list',                         // notifications list
-    '[data-finite-scroll-hotkey-context="NOTIFICATIONS"]',
-    '.notification-card',
-    '.mn-conversation',                            // messaging
-    '.msg-overlay',                                // messaging overlay
-  ];
+// =====================================================================
+// STRUCTURAL DETECTION ENGINE
+// Resilient to LinkedIn DOM class name changes.
+// Detects the three-dot menu by SVG icon shape, not CSS class names.
+// Validates post context via structural scoring (social buttons, profile links, timestamps).
+// =====================================================================
 
-  let current: Element | null = el;
-  while (current) {
-    for (const sel of notificationSelectors) {
-      if (current.matches(sel)) {
-        return false;
-      }
+/**
+ * Detect whether a button is a "three-dot / ellipsis / more options" button
+ * by inspecting the SVG icon it contains rather than CSS class names.
+ *
+ * LinkedIn's three-dot icon is an SVG containing exactly 3 small circles
+ * (rendered as <circle>, or as <ellipse>, or as 3 short arc <path> commands).
+ * This function checks multiple structural signals:
+ *   1. SVG with exactly 3 <circle> or <ellipse> children
+ *   2. SVG whose path data contains 3 arc/circle-like segments
+ *   3. Element whose text content (after trimming) is literally "…" or "···"
+ *   4. aria-label containing "more", "menu", "options", "overflow", "control"
+ */
+function isThreeDotButton(el: Element): boolean {
+  // --- Signal 1: aria-label (most reliable when present) ---
+  const ariaLabel = (el.getAttribute('aria-label') || '').toLowerCase();
+  // Only match patterns specific to three-dot/overflow menus.
+  // Avoid generic words like "control", "action", "dismiss" which match unrelated buttons.
+  const ariaPatterns = /\b(more\s*option|more\s*action|overflow|kebab|ellipsis)\b/;
+  const hasAriaSignal = ariaPatterns.test(ariaLabel);
+
+  // --- Signal 2: SVG icon structure ---
+  const svg = el.querySelector('svg') || (el.tagName === 'svg' ? el : null);
+  let hasSvgSignal = false;
+
+  if (svg) {
+    // 2a: Count <circle> and <ellipse> children — three-dot icon has exactly 3
+    const circles = svg.querySelectorAll('circle, ellipse');
+    if (circles.length === 3) {
+      hasSvgSignal = true;
     }
-    current = current.parentElement;
+
+    // 2b: Check <path> d attribute for 3+ arc segments (some icons use path arcs instead of circle elements)
+    // Only count actual arc commands (A/a), NOT moveto (M) commands — many complex icons have 3+ moveto commands.
+    if (!hasSvgSignal) {
+      const paths = svg.querySelectorAll('path');
+      paths.forEach((path) => {
+        const d = path.getAttribute('d') || '';
+        const arcCount = (d.match(/[Aa]\s*[\d.]+/g) || []).length;
+        if (arcCount >= 3) {
+          hasSvgSignal = true;
+        }
+      });
+    }
+
+    // Removed signal 2c (viewBox + shape count) — too many false positives.
+    // Matching any SVG with 3-8 shapes in a small viewBox would catch nearly every LinkedIn icon.
   }
 
-  // Also check the page URL — only inject on feed and post pages
-  const path = window.location.pathname;
-  const isFeedPage = path === '/' || path === '/feed/' || path === '/feed' ||
-                     path.startsWith('/posts/') || path.startsWith('/feed/update/') ||
-                     path.includes('/recent-activity/') ||
-                     // Individual profile pages with posts
-                     path.startsWith('/in/');
+  // --- Signal 3: Text content is literal ellipsis ---
+  const textContent = (el.textContent || '').trim();
+  const isEllipsisText = textContent === '…' || textContent === '...' || textContent === '⋯' || textContent === '•••';
 
-  return isFeedPage;
+  // --- Decision: require at least one strong signal ---
+  // aria-label alone is sufficient (LinkedIn always has accessibility labels)
+  if (hasAriaSignal) return true;
+  // SVG structure alone is sufficient
+  if (hasSvgSignal) return true;
+  // Text ellipsis alone is sufficient
+  if (isEllipsisText) return true;
+
+  return false;
 }
 
-// Find the post container element by walking up from a menu button
-function findPostContainer(menuButton: Element): Element | null {
-  // Walk up the DOM from the menu button to find the post boundary
-  // We look for common LinkedIn post container patterns
-  let current: Element | null = menuButton;
+/**
+ * Score an ancestor element to determine if it looks like a feed post.
+ * Returns a score (0-100). Higher = more likely a post.
+ *
+ * Signals checked (all class-name-independent):
+ *   - Contains profile link (/in/...)
+ *   - Contains a timestamp-like string (1h, 2d, 3w, etc.)
+ *   - Contains social action buttons (Like, Comment, Repost, Send)
+ *   - Contains an image/avatar near the top
+ *   - Has sufficient height (posts are tall)
+ *   - Contains a link to /feed/update/ or /posts/
+ */
+function scoreAsPost(el: Element): number {
+  let score = 0;
+
+  // Check minimum size — a post is usually at least 150px tall
+  const rect = el.getBoundingClientRect();
+  if (rect.height >= 150) score += 10;
+  if (rect.height >= 300) score += 5;
+
+  // Profile link (/in/...) — strong signal
+  const profileLink = el.querySelector('a[href*="/in/"]');
+  if (profileLink) score += 25;
+
+  // Post permalink — very strong signal
+  const postLink = el.querySelector('a[href*="/feed/update/"], a[href*="/posts/"], a[href*="activity-"]');
+  if (postLink) score += 30;
+
+  // Social action buttons — check for text content "Like", "Comment", "Repost", "Send"
+  const buttons = el.querySelectorAll('button, a');
+  let socialButtonCount = 0;
+  const socialPatterns = /^(like|comment|repost|share|send|celebrate|support|love|insightful|funny)$/i;
+  buttons.forEach((btn) => {
+    const text = (btn.textContent || '').trim().split('\n')[0].trim();
+    if (socialPatterns.test(text)) {
+      socialButtonCount++;
+    }
+    // Also check aria-label for social buttons
+    const label = (btn.getAttribute('aria-label') || '').toLowerCase();
+    if (/^(like|comment|repost|share|send)/.test(label)) {
+      socialButtonCount++;
+    }
+  });
+  if (socialButtonCount >= 2) score += 25;
+  else if (socialButtonCount >= 1) score += 15;
+
+  // Timestamp pattern — "1h", "2d", "3w", "1mo", "12m", or "Just now"
+  const text = el.textContent || '';
+  const hasTimestamp = /\b(\d{1,2}[hdwm]o?\b|Just now|yesterday|\d+ (hour|day|week|month|minute)s? ago)/i.test(text);
+  if (hasTimestamp) score += 15;
+
+  // data-urn or data-id containing "activity" — legacy but still possible
+  if (el.getAttribute('data-urn')?.includes('activity') ||
+      el.getAttribute('data-id')?.includes('activity')) {
+    score += 20;
+  }
+
+  return score;
+}
+
+/**
+ * Find the post container by walking up from a button and scoring each ancestor.
+ * Returns the highest-scoring ancestor that looks like a post.
+ */
+function findPostContainer(button: Element): Element | null {
+  let current: Element | null = button.parentElement;
+  let bestCandidate: Element | null = null;
+  let bestScore = 0;
   let depth = 0;
-  const maxDepth = 15; // Don't walk too far up
+  const maxDepth = 20;
 
   while (current && depth < maxDepth) {
-    // Check for known post container indicators
-    if (
-      current.getAttribute('data-urn') ||
-      current.getAttribute('data-id')?.startsWith('urn:li:activity') ||
-      current.classList.contains('feed-shared-update-v2') ||
-      current.classList.contains('feed-shared-update') ||
-      // Modern LinkedIn uses generic div wrappers; detect by role or structure
-      (current.getAttribute('role') === 'article') ||
-      // Look for a div that contains both the social actions bar and the post header
-      (current.querySelector('.social-details-social-counts') && current.querySelector('.update-components-actor')) ||
-      // Generic: a container that has feed update classes
-      current.className?.includes('feed-shared') ||
-      // Modern LinkedIn: check for a container with social action buttons (like, comment, share)
-      (current.querySelector('[class*="social-actions"]') || current.querySelector('[class*="feed-shared-social-action"]'))
-    ) {
-      return current;
+    const s = scoreAsPost(current);
+    if (s > bestScore) {
+      bestScore = s;
+      bestCandidate = current;
     }
+    // If we found a very strong match, stop early
+    if (bestScore >= 60) break;
 
     current = current.parentElement;
     depth++;
   }
 
-  // Fallback: return the element 5-8 levels up from the menu button (typical depth)
-  current = menuButton;
-  for (let i = 0; i < 6 && current?.parentElement; i++) {
-    current = current.parentElement;
+  // Require a minimum score to avoid injecting into random DOM.
+  // Score of 40 requires at least a profile link + timestamp, or a post permalink + height,
+  // which filters out non-post elements like LinkedIn News, sidebar widgets, etc.
+  if (bestScore >= 40 && bestCandidate) {
+    // A real post is a card within the feed column (~550-700px wide).
+    // Reject candidates that are page-level wrappers (>900px wide) — these score
+    // high only because they contain the entire feed, not because they ARE a post.
+    const candidateRect = bestCandidate.getBoundingClientRect();
+    if (candidateRect.width > 900) {
+      return null;
+    }
+    return bestCandidate;
   }
-  return current;
+
+  // No fallback — if nothing scores high enough, this button is not in a real post.
+  return null;
+}
+
+/**
+ * Check if a button is inside a comment context (not a top-level post).
+ * Comments have "Reply" actions as nearby siblings, which post-level buttons do not.
+ *
+ * IMPORTANT: Only checks siblings at each ancestor level, NOT full subtrees.
+ * Using querySelectorAll on ancestors would match the parent post (which contains
+ * comment sections with "Reply" text), incorrectly filtering out post-level buttons.
+ */
+function isInsideCommentContext(el: Element): boolean {
+  let current: Element | null = el;
+
+  for (let depth = 0; depth < 6 && current; depth++) {
+    const parentEl: Element | null = current.parentElement;
+    if (!parentEl) break;
+
+    // Check siblings of the current element for "Reply" text.
+    // In LinkedIn comments, the action bar has Like, Reply, and the menu button as siblings.
+    const siblings = parentEl.children;
+    for (let i = 0; i < siblings.length; i++) {
+      const sibling = siblings[i];
+      if (sibling === current) continue;
+      const text = (sibling.textContent || '').trim();
+      if (/^Reply$/i.test(text)) {
+        return true;
+      }
+    }
+
+    current = parentEl;
+  }
+
+  return false;
+}
+
+/**
+ * Check if a button is inside a non-feed context (notifications, messaging, nav, etc.)
+ * Uses structural signals, not class names.
+ */
+function isInExcludedContext(el: Element): boolean {
+  // URL-based check first — only inject on feed/post pages
+  const path = window.location.pathname;
+  const isExcludedPage = path.startsWith('/notifications') ||
+                         path.startsWith('/messaging') ||
+                         path.startsWith('/jobs') ||
+                         path.startsWith('/mynetwork') ||
+                         path.startsWith('/settings') ||
+                         path.startsWith('/premium');
+  if (isExcludedPage) return true;
+
+  // Quick check: is the button inside a navigation, header, or sidebar element?
+  // This prevents injection into LinkedIn's top navbar and right sidebar (LinkedIn News, ads, etc.).
+  if (el.closest('header, nav, aside, [role="navigation"], [role="banner"], [role="complementary"]')) {
+    return true;
+  }
+
+  // Walk up and check for structural exclusion signals
+  let current: Element | null = el;
+  let depth = 0;
+  while (current && depth < 15) {
+    // Check aria roles that indicate non-feed context
+    const role = current.getAttribute('role');
+    if (role === 'dialog' || role === 'alertdialog') return true;
+
+    // Check for notification/messaging identifiers (text-based, not class-based)
+    const ariaLabel = (current.getAttribute('aria-label') || '').toLowerCase();
+    if (ariaLabel.includes('notification') || ariaLabel.includes('messaging') || ariaLabel.includes('message')) {
+      return true;
+    }
+
+    // Check data attributes that indicate notification context
+    const hotkey = current.getAttribute('data-finite-scroll-hotkey-context');
+    if (hotkey === 'NOTIFICATIONS' || hotkey === 'MESSAGING') return true;
+
+    current = current.parentElement;
+    depth++;
+  }
+
+  return false;
 }
 
 // Create and inject Recollect button next to the three-dot menu
 async function injectRecollectButton(menuButton: Element, postContainer: Element) {
-  // Check if button already exists next to this menu button
   const menuContainer = menuButton.parentElement;
-  if (!menuContainer) {
-    console.log('[Recollect] No menu container found');
-    return;
-  }
+  if (!menuContainer) return;
 
-  if (menuContainer.querySelector(`.${RECOLLECT_BUTTON_CLASS}`)) {
-    return; // Already injected
-  }
+  // Already injected
+  if (menuContainer.querySelector(`.${RECOLLECT_BUTTON_CLASS}`)) return;
 
-  // Skip if not in feed context (notifications, messaging, etc.)
-  if (!isInFeedContext(menuButton)) {
-    console.log('[Recollect] Skipping non-feed context element');
-    return;
-  }
+  // Skip excluded contexts (notifications, messaging, dialogs)
+  if (isInExcludedContext(menuButton)) return;
+
+  // Skip buttons inside comment sections
+  if (isInsideCommentContext(menuButton)) return;
 
   // Mark as processed
   menuButton.setAttribute('data-recollect-processed', 'true');
 
-  // Get post URL from the post container
+  // Get post URL
   const postUrl = getPostUrl(postContainer);
   if (!postUrl) {
     console.log('[Recollect] Could not extract post URL');
     return;
   }
 
-  // Create our custom button
+  // Create button
   const recollectButton = document.createElement('button');
   recollectButton.className = RECOLLECT_BUTTON_CLASS;
   recollectButton.setAttribute('aria-label', 'Save to Recollect');
   recollectButton.setAttribute('title', 'Save to Recollect');
   recollectButton.setAttribute('type', 'button');
 
-  // Get the logo URL
   const logoUrl = chrome.runtime.getURL('public/icon_with_dark_bg.png');
-  recollectButton.innerHTML = `<img src="${logoUrl}" alt="Recollect" onerror="console.error('[Recollect] Failed to load logo')" />`;
+  recollectButton.innerHTML = `<img src="${logoUrl}" alt="Recollect" />`;
 
-  // Check if this post is already saved
+  // Apply saved state
   const savedState = savedPosts.get(postUrl);
   if (savedState) {
     if (savedState.status === 'saved') {
@@ -1757,12 +1924,11 @@ async function injectRecollectButton(menuButton: Element, postContainer: Element
     }
   }
 
-  // Add click handler
+  // Click handler
   recollectButton.addEventListener('click', (e) => {
     e.preventDefault();
     e.stopPropagation();
 
-    // Read current state at click time, not injection time
     const currentState = savedPosts.get(postUrl);
     if (currentState?.status === 'saved') {
       showNotification('This post is already saved', 'success');
@@ -1772,128 +1938,74 @@ async function injectRecollectButton(menuButton: Element, postContainer: Element
     savePost(postUrl, recollectButton);
   });
 
-  // Insert Recollect button *before* the three-dot menu so it stays visible (containers often clip overflow on the right)
+  // Insert before the three-dot menu
   menuContainer.insertBefore(recollectButton, menuButton);
 
   console.log('[Recollect] Button injected for:', postUrl);
 }
 
-// All selectors for finding the three-dot menu button on posts (order: most specific first)
-const MENU_BUTTON_SELECTORS = [
-  'button.feed-shared-control-menu__trigger',
-  'button[aria-label*="control menu"]',
-  'button[aria-label*="Control menu"]',
-  'button[aria-label*="More actions"]',
-  'button[aria-label*="more actions"]',
-  'button[aria-label*="Open control menu"]',
-  'button[aria-label*="overflow"]',
-  '.feed-shared-control-menu button',
-  'button.artdeco-dropdown__trigger',
-  'button[data-control-name="overlay.overflow_menu"]',
-  // Generic: any button that looks like overflow (often has data-test-id or similar)
-  'button[data-test-id="feed-post-more-options"]',
-  'button[aria-haspopup="menu"]',
-  // Parent-based: buttons inside overflow/control menu containers
-  '[class*="feed-shared-control-menu"] button',
-  '[class*="overflow-menu"] button',
-  '[class*="social-details-social-actions"] button[aria-label]',
-];
-
-// Find all three-dot menu buttons on the page
-function findAllMenuButtons(): Element[] {
-  const buttons: Element[] = [];
+/**
+ * Find all three-dot menu buttons on the page using structural detection.
+ * This does NOT rely on CSS class names — it inspects SVG icon structure,
+ * aria-labels, and text content.
+ */
+function findThreeDotButtons(): Element[] {
+  const results: Element[] = [];
   const seen = new Set<Element>();
 
-  for (const selector of MENU_BUTTON_SELECTORS) {
-    try {
-      const found = document.querySelectorAll(selector);
-      found.forEach((el) => {
-        if (!seen.has(el)) {
-          seen.add(el);
-          buttons.push(el);
-        }
-      });
-    } catch {
-      // Invalid or unsupported selector, skip
-    }
-  }
+  // Get ALL buttons on the page and filter by structural signals
+  const allButtons = document.querySelectorAll('button');
+  allButtons.forEach((btn) => {
+    if (seen.has(btn)) return;
+    if (btn.getAttribute('data-recollect-processed') === 'true') return;
 
-  // Fallback: find buttons by aria-label text inside feed-like containers (resilient to LinkedIn DOM changes)
-  const feedContainers = document.querySelectorAll(
-    '[data-urn*="activity"], [class*="feed-shared-update"], [class*="update-components-actor"], article[role="article"]'
-  );
-  const morePattern = /more|overflow|control|option|menu|\.\.\./i;
-  feedContainers.forEach((container) => {
-    container.querySelectorAll('button[aria-label]').forEach((btn) => {
-      const label = (btn.getAttribute('aria-label') || '').toLowerCase();
-      if (morePattern.test(label) && !seen.has(btn)) {
-        seen.add(btn);
-        buttons.push(btn);
-      }
-    });
+    if (isThreeDotButton(btn)) {
+      seen.add(btn);
+      results.push(btn);
+    }
   });
 
-  return buttons;
+  console.log(`[Recollect] Structural scan found ${results.length} three-dot buttons`);
+  return results;
 }
 
-// Scan all existing posts and inject buttons (bottom-up approach)
-// Instead of finding posts first then looking for menus inside,
-// we find menu buttons first then walk up to find the post container.
-// This is resilient to LinkedIn changing their post container classes.
+/**
+ * Main scan function — finds three-dot buttons, scores their ancestors as posts,
+ * and injects the Recollect save button where appropriate.
+ */
 async function scanAndInjectButtons() {
-  console.log('[Recollect] Starting scan for posts (bottom-up approach)...');
+  console.log('[Recollect] Starting structural scan...');
 
-  // Strategy 1: Bottom-up — find all three-dot menu buttons, walk up to post
-  const menuButtons = findAllMenuButtons();
-  console.log(`[Recollect] Found ${menuButtons.length} menu buttons on page`);
-
+  const threeDotButtons = findThreeDotButtons();
   let injectedCount = 0;
 
-  menuButtons.forEach((menuBtn) => {
-    // Skip if already processed
-    if (menuBtn.getAttribute('data-recollect-processed') === 'true') {
-      return;
-    }
+  for (const btn of threeDotButtons) {
+    if (btn.getAttribute('data-recollect-processed') === 'true') continue;
 
-    // Find the post container by walking up
-    const postContainer = findPostContainer(menuBtn);
+    const postContainer = findPostContainer(btn);
     if (!postContainer) {
-      console.log('[Recollect] Could not find post container for menu button');
-      return;
+      console.log('[Recollect] No valid post container found, skipping');
+      btn.setAttribute('data-recollect-processed', 'true');
+      continue;
     }
 
-    injectRecollectButton(menuBtn, postContainer);
+    // Position check: the button must be in the header area (top portion) of the post.
+    // This filters out buttons in the action bar (Like/Comment/Repost/Send),
+    // the comments section, and other lower parts of the post.
+    const postRect = postContainer.getBoundingClientRect();
+    const buttonRect = btn.getBoundingClientRect();
+    const relativeTop = buttonRect.top - postRect.top;
+    if (postRect.height > 0 && relativeTop > 100) {
+      console.log(`[Recollect] Button is ${relativeTop}px from post top (> 100px header zone), skipping`);
+      btn.setAttribute('data-recollect-processed', 'true');
+      continue;
+    }
+
+    injectRecollectButton(btn, postContainer);
     injectedCount++;
-  });
+  }
 
-  // Strategy 2: Also try the legacy top-down approach for older LinkedIn layouts
-  const legacySelectors = [
-    '[data-urn]',
-    '.feed-shared-update-v2',
-    '.feed-shared-update',
-    '[data-id^="urn:li:activity"]'
-  ];
-
-  legacySelectors.forEach(selector => {
-    const found = document.querySelectorAll(selector);
-    if (found.length > 0) {
-      console.log(`[Recollect] Legacy selector "${selector}" found ${found.length} elements`);
-    }
-    found.forEach(post => {
-      if (post.getAttribute('data-recollect-processed') === 'true') return;
-
-      for (const menuSel of MENU_BUTTON_SELECTORS) {
-        const menuBtn = post.querySelector(menuSel);
-        if (menuBtn && !menuBtn.getAttribute('data-recollect-processed')) {
-          injectRecollectButton(menuBtn, post);
-          injectedCount++;
-          break;
-        }
-      }
-    });
-  });
-
-  console.log(`[Recollect] Final result: injected ${injectedCount} buttons`);
+  console.log(`[Recollect] Scan complete: injected ${injectedCount} buttons`);
 }
 
 // Watch for new posts being added to the feed
@@ -1953,20 +2065,11 @@ function observePosts() {
 function init() {
   console.log('[Recollect] Initializing LinkedIn integration...');
   console.log('[Recollect] Current URL:', window.location.href);
-  console.log('[Recollect] Document ready state:', document.readyState);
 
-  // Skip non-feed pages entirely (login, settings, etc.)
+  // Skip login/signup pages — no posts there
   const path = window.location.pathname;
-  const isSupportedPage = path === '/' || path === '/feed/' || path === '/feed' ||
-                          path.startsWith('/posts/') || path.startsWith('/feed/update/') ||
-                          path.includes('/recent-activity/') ||
-                          path.startsWith('/in/');
-  if (!isSupportedPage) {
-    console.log('[Recollect] Not a feed/post page, skipping button injection. Path:', path);
-    // Still inject styles and sidebar for keyboard shortcut saving
-    injectStyles();
-    createToggleButton();
-    createSidebar();
+  if (path.startsWith('/login') || path.startsWith('/signup') || path.startsWith('/checkpoint')) {
+    console.log('[Recollect] Login/signup page, skipping');
     return;
   }
 
