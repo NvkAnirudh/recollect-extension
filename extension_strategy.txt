@@ -1,0 +1,22 @@
+XTo capture a LinkedIn post URL reliably without depending on changing class names or fragile DOM paths, you must target the unique ID (URN) that LinkedIn assigns to every post. This ID is embedded in a few stable places within the HTML of each post container.
+1. Extract the URN from Data Attributes
+The most resilient way to find a post's unique identifier is to look for the data-urn or data-id attribute on the post’s wrapper. LinkedIn usually uses a wrapper like div.feed-shared-update-v2 or similar.
+Stable Attribute: Look for attributes starting with urn:li:activity:.
+Method: Use element.getAttribute('data-urn') on the post container. This URN is the core identifier for the post and does not change even if the UI does. 
+2. Construct the Permalink Manually
+Once you have the URN (e.g., urn:li:activity:71234567890), you can instantly build a working, permanent URL that bypasses the need to find the "Copy link" button in the DOM.
+Base URL: https://www.linkedin.com/feed/update/
+Result: https://www.linkedin.com
+3. Locating the "Share" or "More" Elements
+If you can't find a data-urn on the main container, you can look for the "Copy link to post" link hidden in the "More" menu (the three dots). 
+The "Control" Search: Instead of searching for .button-class-name, search for a button that contains an icon with an aria-label or type like "more-options".
+Text-Based Search (XPath): Use //button[contains(., 'Copy link')] to find the specific element by its user-facing text, which is far less likely to change than the underlying code.
+4. Use Event Delegation
+Instead of trying to find every post on the page at once, use Event Delegation. Attach a single click listener to the document.
+When a user clicks your "Save" button, use event.target.closest('[data-urn]').
+This "bubbles up" from your button to the nearest parent container that has a LinkedIn ID.
+This way, your code doesn't care where the button is in the structure, only that it is inside a post.
+Implementation Checklist
+Find Parent: Use closest() to find the main post container GitHub Repository Example.
+Grab ID: Extract the data-urn attribute LinkedIn Post ID Discussion.
+Save: Use the Chrome Storage API to store the constructed URL.

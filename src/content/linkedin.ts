@@ -1,25 +1,14 @@
-// LinkedIn Content Script - Add custom "Save to Recollect" button to posts
+// LinkedIn Content Script - Recollect sidebar with saved content and save link functionality
 
 console.log('[Recollect] LinkedIn content script loaded');
-
-// Configuration
-const RECOLLECT_BUTTON_CLASS = 'recollect-save-button';
-
-// Track saved posts and their statuses
-interface SavedPost {
-  status: 'saving' | 'saved' | 'failed';
-  contentId?: string;
-}
-
-const savedPosts = new Map<string, SavedPost>();
 
 // Sidebar state
 let sidebarOpen = false;
 let sidebarElement: HTMLElement | null = null;
 let toggleButton: HTMLElement | null = null;
 let overlayElement: HTMLElement | null = null;
-let currentDateFilter: '24h' | '7d' | '30d' = '30d'; // Default to 30 days
 let currentPlatformFilter: 'all' | 'linkedin' | 'instagram' | 'youtube' | 'tiktok' = 'all'; // Default to all platforms
+let currentMainTab: 'saved-content' | 'save-link' = 'saved-content';
 let platformSummary: any = null; // Store platform counts
 
 // Inject styles
@@ -52,59 +41,6 @@ function injectStyles() {
       border-left: 4px solid #ef4444;
     }
 
-    .${RECOLLECT_BUTTON_CLASS} {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 32px;
-      height: 32px;
-      padding: 0;
-      margin-left: 4px;
-      background: transparent;
-      border: none;
-      cursor: pointer;
-      flex-shrink: 0;
-      position: relative;
-    }
-
-    .${RECOLLECT_BUTTON_CLASS} img {
-      width: 30px;
-      display: block;
-      object-fit: contain;
-      border-radius: 50px;
-      transition: all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
-      filter: drop-shadow(0 0 0 transparent);
-    }
-
-    .${RECOLLECT_BUTTON_CLASS}:hover {
-      background: transparent !important;
-    }
-
-    .${RECOLLECT_BUTTON_CLASS}:hover img {
-      transform: scale(1.15);
-      filter: drop-shadow(0 2px 8px rgba(147, 112, 219, 0.4))
-              drop-shadow(0 0 6px rgba(147, 112, 219, 0.3))
-              brightness(1.1);
-    }
-
-    .${RECOLLECT_BUTTON_CLASS}:active img {
-      transform: scale(1.05);
-      filter: drop-shadow(0 1px 4px rgba(147, 112, 219, 0.3));
-    }
-
-    .${RECOLLECT_BUTTON_CLASS}.saving {
-      pointer-events: none;
-    }
-
-    .${RECOLLECT_BUTTON_CLASS}.saved {
-      pointer-events: none;
-      opacity: 0.6;
-    }
-
-    .${RECOLLECT_BUTTON_CLASS}.failed img {
-      filter: grayscale(1) opacity(0.5);
-    }
-
     /* Professional spinner animation */
     .recollect-spinner {
       width: 20px;
@@ -117,33 +53,6 @@ function injectStyles() {
 
     @keyframes recollect-spin {
       to { transform: rotate(360deg); }
-    }
-
-    /* Success checkmark animation */
-    .recollect-checkmark {
-      width: 20px;
-      height: 20px;
-      border-radius: 50%;
-      background: #10b981;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      animation: recollect-pop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
-    }
-
-    .recollect-checkmark::after {
-      content: '';
-      width: 6px;
-      height: 10px;
-      border: solid white;
-      border-width: 0 2px 2px 0;
-      transform: rotate(45deg) translateY(-1px);
-    }
-
-    @keyframes recollect-pop {
-      0% { transform: scale(0); }
-      50% { transform: scale(1.2); }
-      100% { transform: scale(1); }
     }
 
     /* Sidebar Popup Styles */
@@ -205,6 +114,152 @@ function injectStyles() {
       color: #fff;
     }
 
+    /* Main Tab Navigation (Saved Content / Save Link) */
+    .recollect-main-tabs {
+      display: flex;
+      gap: 0;
+      background: rgba(0, 0, 0, 0.3);
+      border-radius: 8px;
+      padding: 3px;
+      margin-bottom: 12px;
+    }
+
+    .recollect-main-tab {
+      flex: 1;
+      padding: 8px 16px;
+      font-size: 13px;
+      font-weight: 600;
+      color: rgba(255, 255, 255, 0.5);
+      background: transparent;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.2s;
+      text-align: center;
+      white-space: nowrap;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+
+    .recollect-main-tab:hover {
+      color: rgba(255, 255, 255, 0.7);
+      background: rgba(255, 255, 255, 0.05);
+    }
+
+    .recollect-main-tab.active {
+      background: rgba(147, 112, 219, 0.3);
+      color: #fff;
+    }
+
+    /* Save Link View */
+    .recollect-save-link-view {
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .recollect-save-link-title {
+      font-size: 16px;
+      font-weight: 600;
+      color: #fff;
+      margin-bottom: 8px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+
+    .recollect-save-link-subtitle {
+      font-size: 13px;
+      color: rgba(255, 255, 255, 0.5);
+      margin-bottom: 20px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+
+    .recollect-save-link-input-group {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .recollect-save-link-input {
+      width: 100%;
+      padding: 12px 16px;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(147, 112, 219, 0.3);
+      border-radius: 8px;
+      color: #fff;
+      font-size: 14px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      outline: none;
+      transition: border-color 0.2s, background 0.2s;
+      box-sizing: border-box;
+    }
+
+    .recollect-save-link-input::placeholder {
+      color: rgba(255, 255, 255, 0.3);
+    }
+
+    .recollect-save-link-input:focus {
+      border-color: rgba(147, 112, 219, 0.6);
+      background: rgba(255, 255, 255, 0.1);
+    }
+
+    .recollect-save-link-input.error {
+      border-color: #ef4444;
+    }
+
+    .recollect-save-link-submit {
+      width: 100%;
+      padding: 12px 24px;
+      background: linear-gradient(135deg, #9370db 0%, #7b68ee 100%);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 14px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      transition: transform 0.2s, box-shadow 0.2s, opacity 0.2s;
+    }
+
+    .recollect-save-link-submit:hover:not(:disabled) {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(147, 112, 219, 0.4);
+    }
+
+    .recollect-save-link-submit:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    .recollect-save-link-feedback {
+      margin-top: 12px;
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 500;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+
+    .recollect-save-link-feedback.success {
+      background: rgba(16, 185, 129, 0.15);
+      color: #10b981;
+      border: 1px solid rgba(16, 185, 129, 0.3);
+    }
+
+    .recollect-save-link-feedback.error {
+      background: rgba(239, 68, 68, 0.15);
+      color: #ef4444;
+      border: 1px solid rgba(239, 68, 68, 0.3);
+    }
+
+    .recollect-save-link-loading {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: rgba(255, 255, 255, 0.6);
+      font-size: 13px;
+      margin-top: 12px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+
     .recollect-sidebar-content {
       flex: 1;
       overflow-y: auto;
@@ -230,39 +285,6 @@ function injectStyles() {
 
     .recollect-platform-section {
       margin-bottom: 32px;
-    }
-
-    /* Date Filter */
-    .recollect-date-filter {
-      display: flex;
-      gap: 8px;
-      background: rgba(0, 0, 0, 0.2);
-      padding: 4px;
-      border-radius: 8px;
-    }
-
-    .recollect-filter-btn {
-      flex: 1;
-      padding: 6px 12px;
-      font-size: 12px;
-      font-weight: 500;
-      color: rgba(255, 255, 255, 0.6);
-      background: transparent;
-      border: none;
-      border-radius: 6px;
-      cursor: pointer;
-      transition: all 0.2s;
-      white-space: nowrap;
-    }
-
-    .recollect-filter-btn:hover {
-      background: rgba(255, 255, 255, 0.05);
-      color: rgba(255, 255, 255, 0.8);
-    }
-
-    .recollect-filter-btn.active {
-      background: rgba(147, 112, 219, 0.3);
-      color: #fff;
     }
 
     /* Platform Navigation Tabs */
@@ -633,61 +655,6 @@ function showNotification(message: string, type: 'success' | 'error') {
   }, 3000);
 }
 
-// Extract post URL from a post element
-function getPostUrl(postElement: Element): string | null {
-  const allLinks = postElement.querySelectorAll('a[href]');
-
-  // Strategy 1: Look for timestamp/date link (most reliable - points to the specific post)
-  const timestampSelectors = [
-    'a.update-components-actor__sub-description-link',
-    'a[href*="feed/update"]',
-    'a[href*="/posts/"]',
-    'span.update-components-actor__sub-description a',
-    '.feed-shared-actor__sub-description a',
-  ];
-
-  for (const selector of timestampSelectors) {
-    const link = postElement.querySelector(selector);
-    if (link instanceof HTMLAnchorElement && link.href) {
-      return link.href;
-    }
-  }
-
-  // Strategy 2: Look for any link with post/activity URL patterns
-  const updateLink = Array.from(allLinks).find((link) => {
-    const href = (link as HTMLAnchorElement).href;
-    return href.includes('/feed/update/') ||
-           href.includes('/posts/') ||
-           href.includes('activity-') ||
-           href.match(/\/feed\/update\/urn:li:activity:\d+/);
-  });
-
-  if (updateLink instanceof HTMLAnchorElement) {
-    return updateLink.href;
-  }
-
-  // Strategy 3: Look in data attributes (older LinkedIn or specific layouts)
-  const dataUrn = postElement.getAttribute('data-urn') ||
-                  postElement.closest('[data-urn]')?.getAttribute('data-urn');
-  if (dataUrn) {
-    const activityId = dataUrn.match(/activity:(\d+)/)?.[1];
-    if (activityId) {
-      return `https://www.linkedin.com/feed/update/urn:li:activity:${activityId}/`;
-    }
-  }
-
-  // Strategy 4: Check data-id attribute
-  const dataId = postElement.getAttribute('data-id') ||
-                 postElement.closest('[data-id]')?.getAttribute('data-id');
-  if (dataId && dataId.includes('activity')) {
-    return `https://www.linkedin.com/feed/update/${dataId}/`;
-  }
-
-  // Fallback: current page URL
-  console.log('[Recollect] Could not find post URL, using page URL');
-  return window.location.href;
-}
-
 // Check if user is authenticated
 async function isUserAuthenticated(): Promise<boolean> {
   const { token } = await chrome.storage.local.get('token');
@@ -732,121 +699,6 @@ async function isUserAuthenticated(): Promise<boolean> {
   // return !!token;
 }
 
-// Save post to Recollect
-async function savePost(postUrl: string, button: HTMLElement) {
-  console.log('[Recollect] Saving post:', postUrl);
-
-  // Check if user is authenticated
-  const isAuthenticated = await isUserAuthenticated();
-  if (!isAuthenticated) {
-    showNotification('Click to sign in', 'error');
-    console.log('[Recollect] User not authenticated, opening sign-in page...');
-
-    // Open sign-in page in new tab
-    chrome.runtime.sendMessage({ action: 'openSignIn' });
-    return;
-  }
-
-  // Add saving state with professional spinner
-  button.classList.add('saving');
-  const originalContent = button.innerHTML;
-  button.innerHTML = '<div class="recollect-spinner"></div>';
-
-  // Track saving state
-  savedPosts.set(postUrl, { status: 'saving' });
-
-  try {
-    // Send message to background script to save the video
-    // Content scripts delegate API calls to the background service worker
-    chrome.runtime.sendMessage(
-      {
-        action: 'saveVideo',
-        url: postUrl
-      },
-      (response) => {
-        if (chrome.runtime.lastError) {
-          console.error('[Recollect] Message error:', chrome.runtime.lastError);
-          showNotification('Failed to save', 'error');
-          button.innerHTML = originalContent;
-          button.classList.remove('saving');
-          savedPosts.delete(postUrl);
-          return;
-        }
-
-        if (response?.success) {
-          const data = response.data;
-
-          // Check processing_status from backend
-          const processingStatus = data?.processing_status || data?.status;
-
-          if (processingStatus === 'failed') {
-            // Handle failed processing
-            showNotification('Failed to save - this post cannot be saved', 'error');
-            console.error('[Recollect] Processing failed:', data);
-
-            button.innerHTML = originalContent;
-            button.classList.remove('saving');
-            button.classList.add('failed');
-            savedPosts.set(postUrl, { status: 'failed', contentId: data?.id });
-
-            // Remove failed state after 3 seconds
-            setTimeout(() => {
-              button.classList.remove('failed');
-              savedPosts.delete(postUrl);
-            }, 3000);
-            return;
-          }
-
-          // Success - show checkmark animation
-          showNotification('Saved to Recollect!', 'success');
-          console.log('[Recollect] Save successful:', data);
-
-          // Show professional checkmark
-          button.innerHTML = '<div class="recollect-checkmark"></div>';
-          button.classList.remove('saving');
-          button.classList.add('saved');
-
-          // Track saved state
-          savedPosts.set(postUrl, {
-            status: 'saved',
-            contentId: data?.id || data?.content_id
-          });
-
-          // Auto-refresh sidebar if it's open
-          if (sidebarOpen && sidebarElement) {
-            console.log('[Recollect] Auto-refreshing sidebar after save...');
-            setTimeout(() => {
-              renderSidebarContent();
-            }, 1000); // Small delay to allow backend processing
-          }
-
-          // Revert to dimmed icon after 2 seconds
-          setTimeout(() => {
-            button.innerHTML = originalContent;
-            // Keep 'saved' class to show it's already saved
-          }, 2000);
-
-          // Refresh sidebar content if it's open
-          if (sidebarOpen) {
-            renderSidebarContent();
-          }
-        } else {
-          showNotification('Failed to save', 'error');
-          console.error('[Recollect] Save failed:', response?.error);
-          button.innerHTML = originalContent;
-          button.classList.remove('saving');
-          savedPosts.delete(postUrl);
-        }
-      }
-    );
-  } catch (error) {
-    showNotification('Network error', 'error');
-    console.error('[Recollect] Error:', error);
-    button.innerHTML = originalContent;
-    button.classList.remove('saving');
-    savedPosts.delete(postUrl);
-  }
-}
 
 // Fetch saved content from backend
 async function fetchSavedContent(): Promise<any[]> {
@@ -956,26 +808,6 @@ function categorizeByPlatform(contents: any[]) {
   });
 
   return platforms;
-}
-
-// Filter content by date range
-function filterContentByDate(contents: any[], filter: '24h' | '7d' | '30d'): any[] {
-  const now = new Date();
-  const cutoffMs = {
-    '24h': 24 * 60 * 60 * 1000,
-    '7d': 7 * 24 * 60 * 60 * 1000,
-    '30d': 30 * 24 * 60 * 60 * 1000
-  }[filter];
-
-  return contents.filter(content => {
-    try {
-      const createdAt = new Date(content.created_at);
-      const diffMs = now.getTime() - createdAt.getTime();
-      return diffMs <= cutoffMs;
-    } catch {
-      return false;
-    }
-  });
 }
 
 // Get date category for grouping (Today, Yesterday, 2 days ago, etc.)
@@ -1089,7 +921,7 @@ function renderPlatformSection(platform: string, contents: any[]): string {
     allItemsHTML = `
       <div class="recollect-empty-platform">
         <div style="color: rgba(255, 255, 255, 0.4); font-size: 13px;">
-          No ${platformNames[platform].toLowerCase()} content in this time range
+          No ${platformNames[platform].toLowerCase()} content saved yet
         </div>
       </div>
     `;
@@ -1270,8 +1102,161 @@ function updatePlatformTabCounts() {
   }
 }
 
+// Render the Save Link view in the sidebar
+function renderSaveLinkView() {
+  const contentDiv = sidebarElement?.querySelector('.recollect-sidebar-content');
+  if (!contentDiv) return;
+
+  contentDiv.innerHTML = `
+    <div class="recollect-save-link-view">
+      <div class="recollect-save-link-title">Save a Link</div>
+      <div class="recollect-save-link-subtitle">
+        Paste any URL from LinkedIn, Instagram, YouTube, or TikTok
+      </div>
+      <div class="recollect-save-link-input-group">
+        <input
+          type="url"
+          class="recollect-save-link-input"
+          id="recollect-save-link-input"
+          placeholder="https://www.youtube.com/watch?v=..."
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <button class="recollect-save-link-submit" id="recollect-save-link-submit">
+          Save Link
+        </button>
+      </div>
+      <div id="recollect-save-link-feedback"></div>
+    </div>
+  `;
+
+  const input = contentDiv.querySelector('#recollect-save-link-input') as HTMLInputElement;
+  const submitBtn = contentDiv.querySelector('#recollect-save-link-submit') as HTMLButtonElement;
+  const feedbackDiv = contentDiv.querySelector('#recollect-save-link-feedback') as HTMLDivElement;
+
+  if (!input || !submitBtn || !feedbackDiv) return;
+
+  // Submit on button click
+  submitBtn.addEventListener('click', () => {
+    handleSaveLinkSubmit(input, submitBtn, feedbackDiv);
+  });
+
+  // Submit on Enter key
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      handleSaveLinkSubmit(input, submitBtn, feedbackDiv);
+    }
+  });
+
+  // Clear error state on input change
+  input.addEventListener('input', () => {
+    input.classList.remove('error');
+    feedbackDiv.innerHTML = '';
+  });
+
+  // Auto-focus the input
+  setTimeout(() => input.focus(), 100);
+}
+
+// Handle Save Link form submission
+async function handleSaveLinkSubmit(
+  input: HTMLInputElement,
+  submitBtn: HTMLButtonElement,
+  feedbackDiv: HTMLDivElement
+) {
+  const url = input.value.trim();
+
+  // Validation
+  if (!url) {
+    input.classList.add('error');
+    feedbackDiv.innerHTML = '<div class="recollect-save-link-feedback error">Please enter a URL</div>';
+    input.focus();
+    return;
+  }
+
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(url);
+  } catch {
+    input.classList.add('error');
+    feedbackDiv.innerHTML = '<div class="recollect-save-link-feedback error">Please enter a valid URL</div>';
+    input.focus();
+    return;
+  }
+
+  if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+    input.classList.add('error');
+    feedbackDiv.innerHTML = '<div class="recollect-save-link-feedback error">URL must start with http:// or https://</div>';
+    input.focus();
+    return;
+  }
+
+  // Auth check
+  const isAuthenticated = await isUserAuthenticated();
+  if (!isAuthenticated) {
+    feedbackDiv.innerHTML = '<div class="recollect-save-link-feedback error">Please sign in to save content</div>';
+    chrome.runtime.sendMessage({ action: 'openSignIn' });
+    return;
+  }
+
+  // Loading state
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Saving...';
+  input.readOnly = true;
+  feedbackDiv.innerHTML = `
+    <div class="recollect-save-link-loading">
+      <div class="recollect-spinner" style="width: 16px; height: 16px; border-width: 2px;"></div>
+      <span>Saving link...</span>
+    </div>
+  `;
+
+  // Send to background service worker
+  chrome.runtime.sendMessage(
+    { action: 'saveVideo', url: url },
+    (response) => {
+      // Reset button state
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Save Link';
+      input.readOnly = false;
+
+      if (chrome.runtime.lastError) {
+        console.error('[Recollect] Save link error:', chrome.runtime.lastError);
+        feedbackDiv.innerHTML = '<div class="recollect-save-link-feedback error">Failed to save. Please try again.</div>';
+        return;
+      }
+
+      if (response?.success) {
+        const data = response.data;
+        const processingStatus = data?.processing_status || data?.status;
+
+        if (processingStatus === 'failed') {
+          feedbackDiv.innerHTML = '<div class="recollect-save-link-feedback error">This link could not be processed. Please check the URL and try again.</div>';
+          return;
+        }
+
+        // Success
+        feedbackDiv.innerHTML = '<div class="recollect-save-link-feedback success">Link saved successfully!</div>';
+        input.value = '';
+
+        // Auto-clear success message after 5 seconds
+        setTimeout(() => {
+          if (feedbackDiv.querySelector('.success')) {
+            feedbackDiv.innerHTML = '';
+          }
+        }, 5000);
+      } else {
+        const errorMsg = response?.error || 'Failed to save';
+        feedbackDiv.innerHTML = `<div class="recollect-save-link-feedback error">${errorMsg}</div>`;
+      }
+    }
+  );
+}
+
 // Render sidebar content
 async function renderSidebarContent() {
+  // Don't render content list if Save Link tab is active
+  if (currentMainTab === 'save-link') return;
+
   const contentDiv = sidebarElement?.querySelector('.recollect-sidebar-content');
   if (!contentDiv) return;
 
@@ -1352,11 +1337,6 @@ async function renderSidebarContent() {
 
   console.log('[Recollect Sidebar] After filtering failed/incomplete:', contents.length, 'items');
 
-  // Apply date filter
-  contents = filterContentByDate(contents, currentDateFilter);
-
-  console.log('[Recollect Sidebar] After date filter:', contents.length, 'items');
-
   // Categorize by platform
   const platforms = categorizeByPlatform(contents);
 
@@ -1411,8 +1391,8 @@ async function renderSidebarContent() {
     contentDiv.innerHTML = `
       <div class="recollect-empty">
         <div class="recollect-empty-icon">📭</div>
-        <div>No ${platformName} content in this time range</div>
-        <div style="margin-top: 8px; font-size: 12px;">Try a different filter or save more content!</div>
+        <div>No ${platformName} content saved yet</div>
+        <div style="margin-top: 8px; font-size: 12px;">Save some content to get started!</div>
       </div>
     `;
     return;
@@ -1468,15 +1448,15 @@ function createSidebar() {
       <div class="recollect-header-top">
         <div class="recollect-sidebar-title">
           <img src="${logoUrl}" style="width: 38px; height: 30px; border-radius: 6px;" alt="Recollect" />
-          <span>Saved Content</span>
+          <span>Recollect</span>
         </div>
         <button class="recollect-sidebar-close" aria-label="Close sidebar">×</button>
       </div>
-      <div class="recollect-date-filter">
-        <button class="recollect-filter-btn" data-filter="24h">Last 24 Hours</button>
-        <button class="recollect-filter-btn" data-filter="7d">This Week</button>
-        <button class="recollect-filter-btn active" data-filter="30d">This Month</button>
+      <div class="recollect-main-tabs">
+        <button class="recollect-main-tab active" data-main-tab="saved-content">Saved Content</button>
+        <button class="recollect-main-tab" data-main-tab="save-link">Save Link</button>
       </div>
+      <div class="recollect-platform-nav-container">
       <div class="recollect-platform-nav">
         <button class="recollect-platform-tab recollect-platform-tab-all active" data-platform="all" title="All Platforms">
           <div class="recollect-platform-tab-text">All</div>
@@ -1515,6 +1495,7 @@ function createSidebar() {
           <div class="recollect-platform-tab-count">0</div>
         </button>
       </div>
+      </div>
     </div>
     <div class="recollect-sidebar-content"></div>
   `;
@@ -1526,20 +1507,31 @@ function createSidebar() {
   const closeBtn = sidebar.querySelector('.recollect-sidebar-close');
   closeBtn?.addEventListener('click', closeSidebar);
 
-  // Add date filter handlers
-  const filterButtons = sidebar.querySelectorAll('.recollect-filter-btn');
-  filterButtons.forEach(btn => {
-    btn.addEventListener('click', () => {
-      const filter = btn.getAttribute('data-filter') as '24h' | '7d' | '30d';
-      if (filter && filter !== currentDateFilter) {
-        currentDateFilter = filter;
+  // Add main tab handlers (Saved Content / Save Link)
+  const mainTabs = sidebar.querySelectorAll('.recollect-main-tab');
+  const platformNavContainer = sidebar.querySelector('.recollect-platform-nav-container') as HTMLElement | null;
 
-        // Update active state
-        filterButtons.forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
+  mainTabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      const tabName = tab.getAttribute('data-main-tab') as 'saved-content' | 'save-link';
+      if (!tabName || tabName === currentMainTab) return;
 
-        // Re-render content with new filter
+      currentMainTab = tabName;
+
+      // Update tab active state
+      mainTabs.forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+
+      // Show/hide platform tabs
+      if (platformNavContainer) {
+        platformNavContainer.style.display = tabName === 'saved-content' ? 'block' : 'none';
+      }
+
+      // Render the appropriate view
+      if (tabName === 'saved-content') {
         renderSidebarContent();
+      } else {
+        renderSaveLinkView();
       }
     });
   });
@@ -1593,18 +1585,22 @@ async function openSidebar() {
   overlayElement?.classList.add('visible');
   toggleButton?.classList.add('hidden');
 
-  // Fetch summary immediately and update counts
-  platformSummary = await fetchContentSummary();
-  console.log('[Recollect] Fetched summary in openSidebar:', platformSummary);
+  // Load the appropriate view based on current tab
+  if (currentMainTab === 'saved-content') {
+    // Fetch summary immediately and update counts
+    platformSummary = await fetchContentSummary();
+    console.log('[Recollect] Fetched summary in openSidebar:', platformSummary);
 
-  // Update counts with delay to ensure DOM is ready
-  setTimeout(() => {
-    updatePlatformTabCounts();
-    console.log('[Recollect] Updated counts after delay');
-  }, 100);
+    // Update counts with delay to ensure DOM is ready
+    setTimeout(() => {
+      updatePlatformTabCounts();
+      console.log('[Recollect] Updated counts after delay');
+    }, 100);
 
-  // Load content when opening
-  renderSidebarContent();
+    renderSidebarContent();
+  } else {
+    renderSaveLinkView();
+  }
 }
 
 // Close sidebar
@@ -1624,443 +1620,6 @@ function toggleSidebar() {
   }
 }
 
-// =====================================================================
-// STRUCTURAL DETECTION ENGINE
-// Resilient to LinkedIn DOM class name changes.
-// Detects the three-dot menu by SVG icon shape, not CSS class names.
-// Validates post context via structural scoring (social buttons, profile links, timestamps).
-// =====================================================================
-
-/**
- * Detect whether a button is a "three-dot / ellipsis / more options" button
- * by inspecting the SVG icon it contains rather than CSS class names.
- *
- * LinkedIn's three-dot icon is an SVG containing exactly 3 small circles
- * (rendered as <circle>, or as <ellipse>, or as 3 short arc <path> commands).
- * This function checks multiple structural signals:
- *   1. SVG with exactly 3 <circle> or <ellipse> children
- *   2. SVG whose path data contains 3 arc/circle-like segments
- *   3. Element whose text content (after trimming) is literally "…" or "···"
- *   4. aria-label containing "more", "menu", "options", "overflow", "control"
- */
-function isThreeDotButton(el: Element): boolean {
-  // --- Signal 1: aria-label (most reliable when present) ---
-  const ariaLabel = (el.getAttribute('aria-label') || '').toLowerCase();
-  // Only match patterns specific to three-dot/overflow menus.
-  // Avoid generic words like "control", "action", "dismiss" which match unrelated buttons.
-  const ariaPatterns = /\b(more\s*option|more\s*action|overflow|kebab|ellipsis)\b/;
-  const hasAriaSignal = ariaPatterns.test(ariaLabel);
-
-  // --- Signal 2: SVG icon structure ---
-  const svg = el.querySelector('svg') || (el.tagName === 'svg' ? el : null);
-  let hasSvgSignal = false;
-
-  if (svg) {
-    // 2a: Count <circle> and <ellipse> children — three-dot icon has exactly 3
-    const circles = svg.querySelectorAll('circle, ellipse');
-    if (circles.length === 3) {
-      hasSvgSignal = true;
-    }
-
-    // 2b: Check <path> d attribute for 3+ arc segments (some icons use path arcs instead of circle elements)
-    // Only count actual arc commands (A/a), NOT moveto (M) commands — many complex icons have 3+ moveto commands.
-    if (!hasSvgSignal) {
-      const paths = svg.querySelectorAll('path');
-      paths.forEach((path) => {
-        const d = path.getAttribute('d') || '';
-        const arcCount = (d.match(/[Aa]\s*[\d.]+/g) || []).length;
-        if (arcCount >= 3) {
-          hasSvgSignal = true;
-        }
-      });
-    }
-
-    // Removed signal 2c (viewBox + shape count) — too many false positives.
-    // Matching any SVG with 3-8 shapes in a small viewBox would catch nearly every LinkedIn icon.
-  }
-
-  // --- Signal 3: Text content is literal ellipsis ---
-  const textContent = (el.textContent || '').trim();
-  const isEllipsisText = textContent === '…' || textContent === '...' || textContent === '⋯' || textContent === '•••';
-
-  // --- Decision: require at least one strong signal ---
-  // aria-label alone is sufficient (LinkedIn always has accessibility labels)
-  if (hasAriaSignal) return true;
-  // SVG structure alone is sufficient
-  if (hasSvgSignal) return true;
-  // Text ellipsis alone is sufficient
-  if (isEllipsisText) return true;
-
-  return false;
-}
-
-/**
- * Score an ancestor element to determine if it looks like a feed post.
- * Returns a score (0-100). Higher = more likely a post.
- *
- * Signals checked (all class-name-independent):
- *   - Contains profile link (/in/...)
- *   - Contains a timestamp-like string (1h, 2d, 3w, etc.)
- *   - Contains social action buttons (Like, Comment, Repost, Send)
- *   - Contains an image/avatar near the top
- *   - Has sufficient height (posts are tall)
- *   - Contains a link to /feed/update/ or /posts/
- */
-function scoreAsPost(el: Element): number {
-  let score = 0;
-
-  // Check minimum size — a post is usually at least 150px tall
-  const rect = el.getBoundingClientRect();
-  if (rect.height >= 150) score += 10;
-  if (rect.height >= 300) score += 5;
-
-  // Profile link (/in/...) — strong signal
-  const profileLink = el.querySelector('a[href*="/in/"]');
-  if (profileLink) score += 25;
-
-  // Post permalink — very strong signal
-  const postLink = el.querySelector('a[href*="/feed/update/"], a[href*="/posts/"], a[href*="activity-"]');
-  if (postLink) score += 30;
-
-  // Social action buttons — check for text content "Like", "Comment", "Repost", "Send"
-  const buttons = el.querySelectorAll('button, a');
-  let socialButtonCount = 0;
-  const socialPatterns = /^(like|comment|repost|share|send|celebrate|support|love|insightful|funny)$/i;
-  buttons.forEach((btn) => {
-    const text = (btn.textContent || '').trim().split('\n')[0].trim();
-    if (socialPatterns.test(text)) {
-      socialButtonCount++;
-    }
-    // Also check aria-label for social buttons
-    const label = (btn.getAttribute('aria-label') || '').toLowerCase();
-    if (/^(like|comment|repost|share|send)/.test(label)) {
-      socialButtonCount++;
-    }
-  });
-  if (socialButtonCount >= 2) score += 25;
-  else if (socialButtonCount >= 1) score += 15;
-
-  // Timestamp pattern — "1h", "2d", "3w", "1mo", "12m", or "Just now"
-  const text = el.textContent || '';
-  const hasTimestamp = /\b(\d{1,2}[hdwm]o?\b|Just now|yesterday|\d+ (hour|day|week|month|minute)s? ago)/i.test(text);
-  if (hasTimestamp) score += 15;
-
-  // data-urn or data-id containing "activity" — legacy but still possible
-  if (el.getAttribute('data-urn')?.includes('activity') ||
-      el.getAttribute('data-id')?.includes('activity')) {
-    score += 20;
-  }
-
-  return score;
-}
-
-/**
- * Find the post container by walking up from a button and scoring each ancestor.
- * Returns the highest-scoring ancestor that looks like a post.
- */
-function findPostContainer(button: Element): Element | null {
-  let current: Element | null = button.parentElement;
-  let bestCandidate: Element | null = null;
-  let bestScore = 0;
-  let depth = 0;
-  const maxDepth = 20;
-
-  while (current && depth < maxDepth) {
-    const s = scoreAsPost(current);
-    if (s > bestScore) {
-      bestScore = s;
-      bestCandidate = current;
-    }
-    // If we found a very strong match, stop early
-    if (bestScore >= 60) break;
-
-    current = current.parentElement;
-    depth++;
-  }
-
-  // Require a minimum score to avoid injecting into random DOM.
-  // Score of 40 requires at least a profile link + timestamp, or a post permalink + height,
-  // which filters out non-post elements like LinkedIn News, sidebar widgets, etc.
-  if (bestScore >= 40 && bestCandidate) {
-    // A real post is a card within the feed column (~550-700px wide).
-    // Reject candidates that are page-level wrappers (>900px wide) — these score
-    // high only because they contain the entire feed, not because they ARE a post.
-    const candidateRect = bestCandidate.getBoundingClientRect();
-    if (candidateRect.width > 900) {
-      return null;
-    }
-    return bestCandidate;
-  }
-
-  // No fallback — if nothing scores high enough, this button is not in a real post.
-  return null;
-}
-
-/**
- * Check if a button is inside a comment context (not a top-level post).
- * Comments have "Reply" actions as nearby siblings, which post-level buttons do not.
- *
- * IMPORTANT: Only checks siblings at each ancestor level, NOT full subtrees.
- * Using querySelectorAll on ancestors would match the parent post (which contains
- * comment sections with "Reply" text), incorrectly filtering out post-level buttons.
- */
-function isInsideCommentContext(el: Element): boolean {
-  let current: Element | null = el;
-
-  for (let depth = 0; depth < 6 && current; depth++) {
-    const parentEl: Element | null = current.parentElement;
-    if (!parentEl) break;
-
-    // Check siblings of the current element for "Reply" text.
-    // In LinkedIn comments, the action bar has Like, Reply, and the menu button as siblings.
-    const siblings = parentEl.children;
-    for (let i = 0; i < siblings.length; i++) {
-      const sibling = siblings[i];
-      if (sibling === current) continue;
-      const text = (sibling.textContent || '').trim();
-      if (/^Reply$/i.test(text)) {
-        return true;
-      }
-    }
-
-    current = parentEl;
-  }
-
-  return false;
-}
-
-/**
- * Check if a button is inside a non-feed context (notifications, messaging, nav, etc.)
- * Uses structural signals, not class names.
- */
-function isInExcludedContext(el: Element): boolean {
-  // URL-based check first — only inject on feed/post pages
-  const path = window.location.pathname;
-  const isExcludedPage = path.startsWith('/notifications') ||
-                         path.startsWith('/messaging') ||
-                         path.startsWith('/jobs') ||
-                         path.startsWith('/mynetwork') ||
-                         path.startsWith('/settings') ||
-                         path.startsWith('/premium');
-  if (isExcludedPage) return true;
-
-  // Quick check: is the button inside a navigation, header, or sidebar element?
-  // This prevents injection into LinkedIn's top navbar and right sidebar (LinkedIn News, ads, etc.).
-  if (el.closest('header, nav, aside, [role="navigation"], [role="banner"], [role="complementary"]')) {
-    return true;
-  }
-
-  // Walk up and check for structural exclusion signals
-  let current: Element | null = el;
-  let depth = 0;
-  while (current && depth < 15) {
-    // Check aria roles that indicate non-feed context
-    const role = current.getAttribute('role');
-    if (role === 'dialog' || role === 'alertdialog') return true;
-
-    // Check for notification/messaging identifiers (text-based, not class-based)
-    const ariaLabel = (current.getAttribute('aria-label') || '').toLowerCase();
-    if (ariaLabel.includes('notification') || ariaLabel.includes('messaging') || ariaLabel.includes('message')) {
-      return true;
-    }
-
-    // Check data attributes that indicate notification context
-    const hotkey = current.getAttribute('data-finite-scroll-hotkey-context');
-    if (hotkey === 'NOTIFICATIONS' || hotkey === 'MESSAGING') return true;
-
-    current = current.parentElement;
-    depth++;
-  }
-
-  return false;
-}
-
-// Create and inject Recollect button next to the three-dot menu
-async function injectRecollectButton(menuButton: Element, postContainer: Element) {
-  const menuContainer = menuButton.parentElement;
-  if (!menuContainer) return;
-
-  // Already injected
-  if (menuContainer.querySelector(`.${RECOLLECT_BUTTON_CLASS}`)) return;
-
-  // Skip excluded contexts (notifications, messaging, dialogs)
-  if (isInExcludedContext(menuButton)) return;
-
-  // Skip buttons inside comment sections
-  if (isInsideCommentContext(menuButton)) return;
-
-  // Mark as processed
-  menuButton.setAttribute('data-recollect-processed', 'true');
-
-  // Get post URL
-  const postUrl = getPostUrl(postContainer);
-  if (!postUrl) {
-    console.log('[Recollect] Could not extract post URL');
-    return;
-  }
-
-  // Create button
-  const recollectButton = document.createElement('button');
-  recollectButton.className = RECOLLECT_BUTTON_CLASS;
-  recollectButton.setAttribute('aria-label', 'Save to Recollect');
-  recollectButton.setAttribute('title', 'Save to Recollect');
-  recollectButton.setAttribute('type', 'button');
-
-  const logoUrl = chrome.runtime.getURL('public/icon_with_dark_bg.png');
-  recollectButton.innerHTML = `<img src="${logoUrl}" alt="Recollect" />`;
-
-  // Apply saved state
-  const savedState = savedPosts.get(postUrl);
-  if (savedState) {
-    if (savedState.status === 'saved') {
-      recollectButton.classList.add('saved');
-      recollectButton.setAttribute('title', 'Already saved to Recollect');
-    } else if (savedState.status === 'failed') {
-      recollectButton.classList.add('failed');
-      recollectButton.setAttribute('title', 'Failed to save this post');
-    } else if (savedState.status === 'saving') {
-      recollectButton.classList.add('saving');
-      recollectButton.innerHTML = '<div class="recollect-spinner"></div>';
-    }
-  }
-
-  // Click handler
-  recollectButton.addEventListener('click', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-
-    const currentState = savedPosts.get(postUrl);
-    if (currentState?.status === 'saved') {
-      showNotification('This post is already saved', 'success');
-      return;
-    }
-
-    savePost(postUrl, recollectButton);
-  });
-
-  // Insert before the three-dot menu
-  menuContainer.insertBefore(recollectButton, menuButton);
-
-  console.log('[Recollect] Button injected for:', postUrl);
-}
-
-/**
- * Find all three-dot menu buttons on the page using structural detection.
- * This does NOT rely on CSS class names — it inspects SVG icon structure,
- * aria-labels, and text content.
- */
-function findThreeDotButtons(): Element[] {
-  const results: Element[] = [];
-  const seen = new Set<Element>();
-
-  // Get ALL buttons on the page and filter by structural signals
-  const allButtons = document.querySelectorAll('button');
-  allButtons.forEach((btn) => {
-    if (seen.has(btn)) return;
-    if (btn.getAttribute('data-recollect-processed') === 'true') return;
-
-    if (isThreeDotButton(btn)) {
-      seen.add(btn);
-      results.push(btn);
-    }
-  });
-
-  console.log(`[Recollect] Structural scan found ${results.length} three-dot buttons`);
-  return results;
-}
-
-/**
- * Main scan function — finds three-dot buttons, scores their ancestors as posts,
- * and injects the Recollect save button where appropriate.
- */
-async function scanAndInjectButtons() {
-  console.log('[Recollect] Starting structural scan...');
-
-  const threeDotButtons = findThreeDotButtons();
-  let injectedCount = 0;
-
-  for (const btn of threeDotButtons) {
-    if (btn.getAttribute('data-recollect-processed') === 'true') continue;
-
-    const postContainer = findPostContainer(btn);
-    if (!postContainer) {
-      console.log('[Recollect] No valid post container found, skipping');
-      btn.setAttribute('data-recollect-processed', 'true');
-      continue;
-    }
-
-    // Position check: the button must be in the header area (top portion) of the post.
-    // This filters out buttons in the action bar (Like/Comment/Repost/Send),
-    // the comments section, and other lower parts of the post.
-    const postRect = postContainer.getBoundingClientRect();
-    const buttonRect = btn.getBoundingClientRect();
-    const relativeTop = buttonRect.top - postRect.top;
-    if (postRect.height > 0 && relativeTop > 100) {
-      console.log(`[Recollect] Button is ${relativeTop}px from post top (> 100px header zone), skipping`);
-      btn.setAttribute('data-recollect-processed', 'true');
-      continue;
-    }
-
-    injectRecollectButton(btn, postContainer);
-    injectedCount++;
-  }
-
-  console.log(`[Recollect] Scan complete: injected ${injectedCount} buttons`);
-}
-
-// Watch for new posts being added to the feed
-function observePosts() {
-  // Debounce the scan to avoid excessive DOM queries
-  let scanTimeout: ReturnType<typeof setTimeout> | null = null;
-
-  const observer = new MutationObserver((mutations) => {
-    // Check if any meaningful nodes were added (not just text or tiny updates)
-    let hasNewContent = false;
-    for (const mutation of mutations) {
-      for (const node of Array.from(mutation.addedNodes)) {
-        if (node instanceof Element) {
-          hasNewContent = true;
-          break;
-        }
-      }
-      if (hasNewContent) break;
-    }
-
-    if (!hasNewContent) return;
-
-    // Debounce: wait 300ms after the last mutation before scanning
-    if (scanTimeout) clearTimeout(scanTimeout);
-    scanTimeout = setTimeout(() => {
-      scanAndInjectButtons();
-    }, 300);
-  });
-
-  // Try to observe the feed container specifically for better performance
-  const feedContainer = document.querySelector('.scaffold-finite-scroll__content') ||
-                       document.querySelector('[role="main"]') ||
-                       document.querySelector('main') ||
-                       document.body;
-
-  observer.observe(feedContainer, {
-    childList: true,
-    subtree: true,
-  });
-
-  console.log('[Recollect] Post observer started on:', feedContainer.tagName, (feedContainer.className || '').substring(0, 50));
-}
-
-// Remove all injected buttons (not used anymore - icons stay visible for all users)
-// function removeRecollectButtons() {
-//   console.log('[Recollect] Removing all injected buttons...');
-//   const buttons = document.querySelectorAll(`.${RECOLLECT_BUTTON_CLASS}`);
-//   buttons.forEach(button => button.remove());
-//
-//   const processedPosts = document.querySelectorAll('[data-recollect-processed="true"]');
-//   processedPosts.forEach(post => post.removeAttribute('data-recollect-processed'));
-//
-//   console.log(`[Recollect] Removed ${buttons.length} buttons and cleared flags from ${processedPosts.length} posts`);
-// }
-
 // Initialize
 function init() {
   console.log('[Recollect] Initializing LinkedIn integration...');
@@ -2079,24 +1638,6 @@ function init() {
   createToggleButton();
   createSidebar();
 
-  // Scan immediately
-  scanAndInjectButtons();
-
-  // LinkedIn is a SPA that renders content asynchronously.
-  // Retry scanning at multiple intervals to catch late-rendered content.
-  setTimeout(() => {
-    console.log('[Recollect] Running delayed scan (2s)...');
-    scanAndInjectButtons();
-  }, 2000);
-
-  setTimeout(() => {
-    console.log('[Recollect] Running delayed scan (5s)...');
-    scanAndInjectButtons();
-  }, 5000);
-
-  // Watch for new posts (handles infinite scroll and SPA navigation)
-  observePosts();
-
   console.log('[Recollect] LinkedIn integration initialized');
 }
 
@@ -2109,50 +1650,8 @@ if (document.readyState === 'loading') {
   init();
 }
 
-// Listen for keyboard shortcut (Ctrl+Shift+S or Cmd+Shift+S)
+// Listen for keyboard shortcuts
 document.addEventListener('keydown', async (e) => {
-  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'S') {
-    e.preventDefault();
-    console.log('[Recollect] Keyboard shortcut triggered, saving current page');
-
-    // Check if user is authenticated
-    const isAuthenticated = await isUserAuthenticated();
-    if (!isAuthenticated) {
-      showNotification('Click to sign in', 'error');
-      chrome.runtime.sendMessage({ action: 'openSignIn' });
-      return;
-    }
-
-    // Send message to background to save current page
-    chrome.runtime.sendMessage({
-      action: 'saveVideo',
-      url: window.location.href
-    }, (response) => {
-      if (response?.success) {
-        const data = response.data;
-        const processingStatus = data?.processing_status || data?.status;
-
-        if (processingStatus === 'failed') {
-          showNotification('Failed to save - this post cannot be saved', 'error');
-        } else {
-          showNotification('Saved to Recollect!', 'success');
-          // Track the saved state
-          savedPosts.set(window.location.href, {
-            status: 'saved',
-            contentId: data?.id || data?.content_id
-          });
-
-          // Refresh sidebar if open
-          if (sidebarOpen) {
-            renderSidebarContent();
-          }
-        }
-      } else {
-        showNotification('Failed to save', 'error');
-      }
-    });
-  }
-
   // Keyboard shortcut to toggle sidebar (Ctrl+Shift+R or Cmd+Shift+R)
   if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'R') {
     e.preventDefault();
@@ -2178,7 +1677,6 @@ chrome.storage.onChanged.addListener((changes, area) => {
     if (!changes.token.newValue) {
       console.log('[Recollect] ⚠️ User signed out - token removed from storage');
       showNotification('Signed out from Recollect', 'error');
-      // Don't remove buttons - they stay visible
 
       // Close sidebar and clear content
       if (sidebarOpen) {
@@ -2186,7 +1684,6 @@ chrome.storage.onChanged.addListener((changes, area) => {
       }
     } else {
       console.log('[Recollect] ✅ User signed in - token added to storage');
-      // Buttons are already visible, no need to re-inject
 
       // Refresh sidebar if open
       if (sidebarOpen) {
