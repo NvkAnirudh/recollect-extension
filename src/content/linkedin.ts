@@ -1103,9 +1103,46 @@ function updatePlatformTabCounts() {
 }
 
 // Render the Save Link view in the sidebar
-function renderSaveLinkView() {
+async function renderSaveLinkView() {
   const contentDiv = sidebarElement?.querySelector('.recollect-sidebar-content');
   if (!contentDiv) return;
+
+  // Check if user is authenticated first
+  const { token } = await chrome.storage.local.get('token');
+  if (!token) {
+    contentDiv.innerHTML = `
+      <div class="recollect-empty">
+        <div class="recollect-empty-icon">🔒</div>
+        <div>Please sign in to save links</div>
+        <div style="margin-top: 16px;">
+          <button id="recollect-savelink-signin-button" style="
+            background: linear-gradient(135deg, #9370db 0%, #7b68ee 100%);
+            color: white;
+            border: none;
+            padding: 10px 24px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 14px;
+            transition: transform 0.2s, box-shadow 0.2s;
+          " onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 12px rgba(147, 112, 219, 0.4)'"
+             onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='none'">
+            Sign In
+          </button>
+        </div>
+      </div>
+    `;
+
+    const signInButton = contentDiv.querySelector('#recollect-savelink-signin-button');
+    if (signInButton) {
+      signInButton.addEventListener('click', () => {
+        console.log('[Recollect] Opening sign in page from Save Link...');
+        chrome.runtime.sendMessage({ action: 'openSignIn' });
+      });
+    }
+
+    return;
+  }
 
   contentDiv.innerHTML = `
     <div class="recollect-save-link-view">
